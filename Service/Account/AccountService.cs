@@ -1,8 +1,14 @@
 ﻿using Sauvio.Business.Dto;
-using SuavioData.Interfaces;
-using SauvioData.Models;
+using Sauvio.Business.Exceptions;
 using Sauvio.Business.Services.Email;
-
+using SuavioData.Interfaces;
+using SauvioData.Entities.User;
+using Microsoft.IdentityModel.Tokens;
+using static Org.BouncyCastle.Math.EC.ECCurve;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.Extensions.Configuration;
 
 namespace Sauvio.Business.Services.Account
 {
@@ -10,17 +16,19 @@ namespace Sauvio.Business.Services.Account
     {
         private readonly IAccountData _data;
         private readonly IEmailService _email;
+        private readonly IConfiguration _config;
 
-        public AccountService(IAccountData data, IEmailService email)
+        public AccountService(IAccountData data, IEmailService email, IConfiguration config)
         {
             _data = data;
             _email = email;
+            _config = config;  
         }
 
-        public async Task<string> Register(RegisterDTO dto)
+        public async Task Register(RegisterDTO dto)
         {
             if (await _data.GetByEmail(dto.Email) != null)
-                return "Email already registered";
+                throw new ValidationException("Email already registered");
 
             var token = Guid.NewGuid().ToString();
 
@@ -34,39 +42,64 @@ namespace Sauvio.Business.Services.Account
 
             await _data.CreateUser(user);
             _email.SendConfirmationEmail(dto.Email, token);
-
-            return "Registration successful. Please check your email.";
         }
 
-        public async Task<string> ConfirmEmail(string token)
+        public async Task ConfirmEmail(string token)
         {
-            var user = await _data.GetByToken(token);
-            if (user == null) return "Invalid or expired token";
+            var user = await _data.GetByToken(token)
+                ?? throw new ValidationException("Invalid or expired token");
 
             await _data.ConfirmUser(user.Id);
-            return "Email confirmed successfully!";
         }
 
-        public async Task<(bool Success, string Message, User? User)> Login(LoginDTO dto)
+        public async Task<(string Token, User User)> Login(LoginDTO dto)
         {
-            var user = await _data.GetByEmail(dto.Email);
-            if (user == null || !user.IsConfirmed)
-                return (false, "Invalid credentials", null);
+            var user = await _data.GetByEmail(dto.Email)
+                ?? throw new AuthenticationException("Invalid credentials");
 
-            return BCrypt.Net.BCrypt.Verify(dto.Password, user.Password)
-                ? (true, "Login successful", user)
-                : (false, "Invalid credentials", null);
+            if (!user.IsConfirmed)
+                throw new AuthenticationException("Email not confirmed");
+
+            if (!BCrypt.Net.BCrypt.Verify(dto.Password, user.Password))
+                throw new AuthenticationException("Invalid credentials");
+
+            var token = GenerateJwtToken(user);
+            return (token, user);
         }
 
-        public async Task<(bool Success, string Message)> ChangePassword(ChangePasswordDTO dto)
+        public async Task ChangePassword(ChangePasswordDTO dto)
         {
-            var user = await _data.GetById(dto.UserId);
-            if (user == null) return (false, "User not found");
+            var user = await _data.GetById(dto.UserId)
+                ?? throw new NotFoundException("User", dto.UserId);
 
             var hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
             await _data.UpdatePassword(user.Id, hashedPassword);
+        }
 
-            return (true, "Password changed successfully");
+        private string GenerateJwtToken(User user)
+        {
+            var jwtSettings = _config.GetSection("JwtSettings");
+            var key = Encoding.ASCII.GetBytes(jwtSettings["Secret"]);
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[]
+                {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(ClaimTypes.Role, user.IsAdmin ? "Admin" : "User") 
+        }),
+                Expires = DateTime.UtcNow.AddMinutes(double.Parse(jwtSettings["ExpiryMinutes"])),
+                Issuer = jwtSettings["Issuer"],
+                Audience = jwtSettings["Audience"],
+                SigningCredentials = new SigningCredentials(
+                    new SymmetricSecurityKey(key),
+                    SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
         }
     }
 }

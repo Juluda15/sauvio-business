@@ -1,15 +1,15 @@
 ﻿using Sauvio.Business.Dto;
-using SauvioData.Models;
+using SauvioData.Entities.User;
 
 
 namespace Sauvio.Business.Services.Account
 {
     public interface IAccountService
     {
-        Task<string> Register(RegisterDTO dto);
-        Task<(bool Success, string Message, User? User)> Login(LoginDTO dto);
-        Task<string> ConfirmEmail(string token);
-        Task<(bool Success, string Message)> ChangePassword(ChangePasswordDTO dto);
+        Task Register(RegisterDTO dto);
+        Task<(string Token, User User)> Login(LoginDTO dto);
+        Task ConfirmEmail(string token);
+        Task ChangePassword(ChangePasswordDTO dto);
     }
 
 }
