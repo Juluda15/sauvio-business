@@ -15,7 +15,7 @@ namespace Sauvio.Business.Services.Email
             _config = config;
         }
 
-        public void SendConfirmationEmail(string toEmail, string token)
+        public async Task SendConfirmationEmail(string toEmail, string token)
         {
             var message = new MimeMessage();
             message.From.Add(MailboxAddress.Parse(_config["EmailSettings:FromEmail"]));
@@ -27,10 +27,10 @@ namespace Sauvio.Business.Services.Email
             };
 
             using var smtp = new SmtpClient();
-            smtp.Connect(_config["EmailSettings:SmtpServer"], 587, false);
-            smtp.Authenticate(_config["EmailSettings:FromEmail"], _config["EmailSettings:Password"]);
-            smtp.Send(message);
-            smtp.Disconnect(true);
+            await smtp.ConnectAsync(_config["EmailSettings:SmtpServer"], 587, false);
+            await smtp.AuthenticateAsync(_config["EmailSettings:FromEmail"], _config["EmailSettings:Password"]);
+            await smtp.SendAsync(message);
+            await smtp.DisconnectAsync(true);
         }
     }
 }

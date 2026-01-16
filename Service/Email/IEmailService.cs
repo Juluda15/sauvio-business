@@ -2,6 +2,6 @@
 {
     public interface IEmailService
     {
-        void SendConfirmationEmail(string toEmail, string token);
+        Task SendConfirmationEmail(string toEmail, string token);
     }
 }

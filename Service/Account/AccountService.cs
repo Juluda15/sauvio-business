@@ -4,7 +4,6 @@ using Sauvio.Business.Services.Email;
 using SuavioData.Interfaces;
 using SauvioData.Entities.User;
 using Microsoft.IdentityModel.Tokens;
-using static Org.BouncyCastle.Math.EC.ECCurve;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -22,8 +21,9 @@ namespace Sauvio.Business.Services.Account
         {
             _data = data;
             _email = email;
-            _config = config;  
+            _config = config;
         }
+
 
         public async Task Register(RegisterDTO dto)
         {
@@ -41,9 +41,8 @@ namespace Sauvio.Business.Services.Account
             };
 
             await _data.CreateUser(user);
-            _email.SendConfirmationEmail(dto.Email, token);
+            await _email.SendConfirmationEmail(dto.Email, token);
         }
-
         public async Task ConfirmEmail(string token)
         {
             var user = await _data.GetByToken(token)
@@ -51,6 +50,7 @@ namespace Sauvio.Business.Services.Account
 
             await _data.ConfirmUser(user.Id);
         }
+
 
         public async Task<(string Token, User User)> Login(LoginDTO dto)
         {
@@ -67,15 +67,6 @@ namespace Sauvio.Business.Services.Account
             return (token, user);
         }
 
-        public async Task ChangePassword(ChangePasswordDTO dto)
-        {
-            var user = await _data.GetById(dto.UserId)
-                ?? throw new NotFoundException("User", dto.UserId);
-
-            var hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
-            await _data.UpdatePassword(user.Id, hashedPassword);
-        }
-
         private string GenerateJwtToken(User user)
         {
             var jwtSettings = _config.GetSection("JwtSettings");
@@ -86,10 +77,10 @@ namespace Sauvio.Business.Services.Account
             {
                 Subject = new ClaimsIdentity(new[]
                 {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Email, user.Email),
-            new Claim(ClaimTypes.Role, user.IsAdmin ? "Admin" : "User") 
-        }),
+                    new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                    new Claim(ClaimTypes.Email, user.Email),
+                    new Claim(ClaimTypes.Role, user.IsAdmin ? "Admin" : "User")
+                }),
                 Expires = DateTime.UtcNow.AddMinutes(double.Parse(jwtSettings["ExpiryMinutes"])),
                 Issuer = jwtSettings["Issuer"],
                 Audience = jwtSettings["Audience"],
@@ -100,6 +91,43 @@ namespace Sauvio.Business.Services.Account
 
             var token = tokenHandler.CreateToken(tokenDescriptor);
             return tokenHandler.WriteToken(token);
+        }
+
+
+        public async Task ChangePassword(ChangePasswordDTO dto)
+        {
+            var user = await _data.GetById(dto.UserId)
+                ?? throw new NotFoundException("User", dto.UserId);
+
+            var hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+            await _data.UpdatePassword(user.Id, hashedPassword);
+        }
+
+
+        public async Task<List<User>> GetAllUsers()
+        {
+            return await _data.GetAllUsers();
+        }
+
+        public async Task<User> GetUserById(int userId)
+        {
+            var user = await _data.GetById(userId);
+            if (user == null)
+                throw new NotFoundException("User", userId);
+
+            return user;
+        }
+
+        public async Task PromoteToAdmin(int userId)
+        {
+            var user = await _data.GetById(userId);
+            if (user == null)
+                throw new NotFoundException("User", userId);
+
+            if (user.IsAdmin)
+                throw new InvalidOperationException("User is already an admin");
+
+            await _data.SetAdmin(userId, true);
         }
     }
 }
